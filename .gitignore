@@ -1,0 +1,42 @@
+# Secrets — jamais commités
+.env
+*.pem
+*.key
+
+# Données générées — trop volumineuses et non pertinentes en versioning
+data/bronze/
+data/silver/
+data/checkpoints/
+data/raw/*.csv           # si tu gardes un dossier raw pour les fichiers RH bruts
+!data/raw/.gitkeep        # garde le dossier vide visible dans le repo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Spark
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Grafana / Prometheus — données runtime, pas de la config
+config/grafana/data/
+config/prometheus/data/
+
+# Jupyter (si tu explores les données en notebook)
+.ipynb_checkpoints/
+
+# OS / éditeur
+.DS_Store
+.vscode/
+.idea/
