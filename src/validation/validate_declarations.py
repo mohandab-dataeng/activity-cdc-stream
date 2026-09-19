@@ -1,53 +1,58 @@
 """
 validate_declarations.py
-Étape 1 : calcule et stocke la distance domicile-travail de chaque salarié.
-Étape 2 : applique les seuils selon le moyen de déplacement déclaré pour détecter les anomalies.
+Étape 1 : calcule et stocke la distance domicile-travail de chaque salarié
+          (géocodage via Nominatim, distance via un serveur OSRM local).
+Étape 2 : applique les seuils selon le moyen de déplacement déclaré pour
+          détecter les anomalies.
+Règles (note de cadrage) :
+  - Marche/running          -> max 15 km
+  - Vélo/Trottinette/Autres -> max 25 km
 """
 
-import time
-import openrouteservice
+import requests
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.config import DATABASE_URL, OPENROUTESERVICE_API_KEY
+from src.config import DATABASE_URL
 from src.ingestion.models import Salarie, DistanceDomicileTravail, ValidationDeplacement
 
 ADRESSE_ENTREPRISE = "1362 Avenue des Platanes, 34970 Lattes, France"
+OSRM_URL = "http://localhost:5000"
 
 SEUILS_KM = {
     "Marche/running": 15,
     "Vélo/Trottinette/Autres": 25,
 }
 
-client = openrouteservice.Client(key=OPENROUTESERVICE_API_KEY)
+# Client Nominatim — utilisé uniquement pour le géocodage (adresse -> coordonnées)
+geolocalisateur = Nominatim(user_agent="activity-cdc-stream-projet12")
+geocoder_avec_delai = RateLimiter(geolocalisateur.geocode, min_delay_seconds=1)
 
 
-def geocoder_adresse(adresse, max_tentatives=3):
-    for tentative in range(max_tentatives):
-        try:
-            resultat = client.pelias_search(text=adresse)
-            if not resultat["features"]:
-                return None
-            return resultat["features"][0]["geometry"]["coordinates"]
-        except openrouteservice.exceptions.ApiError as e:
-            if "Quota exceeded" in str(e) and tentative < max_tentatives - 1:
-                print(f"Quota atteint, pause de 60s avant nouvelle tentative...")
-                time.sleep(60)
-            else:
-                raise
+def geocoder_adresse(adresse):
+    """Géocode une adresse via Nominatim (OpenStreetMap), gratuit et sans quota bas."""
+    resultat = geocoder_avec_delai(adresse)
+    if resultat is None:
+        return None
+    return [resultat.longitude, resultat.latitude]
 
 
 def calculer_distance_km(coord_depart, coord_arrivee):
-    matrice = client.distance_matrix(
-        locations=[coord_depart, coord_arrivee],
-        profile="driving-car",
-        metrics=["distance"],
-    )
-    return matrice["distances"][0][1] / 1000
+    """Distance routière via le serveur OSRM local (Docker), sans quota."""
+    lon1, lat1 = coord_depart
+    lon2, lat2 = coord_arrivee
+    url = f"{OSRM_URL}/route/v1/driving/{lon1},{lat1};{lon2},{lat2}"
+    reponse = requests.get(url, timeout=10)
+    reponse.raise_for_status()
+    data = reponse.json()
+    distance_m = data["routes"][0]["distance"]
+    return distance_m / 1000
 
 
 def calculer_toutes_distances(session, coord_entreprise):
-    """Calcule les distances en un minimum d'appels API (1 seul appel matrix groupé)."""
+    """Calcule les distances via OSRM local (aucune limite, aucun sleep nécessaire)."""
     salaries = session.query(Salarie).all()
     a_calculer = []
 
@@ -60,26 +65,15 @@ def calculer_toutes_distances(session, coord_entreprise):
         print("Toutes les distances sont déjà à jour.")
         return
 
-    print(f"{len(a_calculer)} salarié(s) à géocoder...")
-    coords_domiciles = []
+    print(f"{len(a_calculer)} salarié(s) à traiter...")
+
     for salarie in a_calculer:
-        coord = geocoder_adresse(salarie.adresse_domicile)
-        coords_domiciles.append(coord)
-        time.sleep(2)
+        coord_domicile = geocoder_adresse(salarie.adresse_domicile)
+        if coord_domicile is None:
+            print(f"Adresse non géocodée : salarié {salarie.id_salarie}")
+            continue
 
-    toutes_locations = coords_domiciles + [coord_entreprise]
-    index_entreprise = len(coords_domiciles)
-
-    matrice = client.distance_matrix(
-        locations=toutes_locations,
-        sources=list(range(len(coords_domiciles))),
-        destinations=[index_entreprise],
-        profile="driving-car",
-        metrics=["distance"],
-    )
-
-    for salarie, ligne_distance in zip(a_calculer, matrice["distances"]):
-        distance_km = ligne_distance[0] / 1000
+        distance_km = calculer_distance_km(coord_domicile, coord_entreprise)
         distance = DistanceDomicileTravail(
             id_salarie=salarie.id_salarie,
             adresse_utilisee=salarie.adresse_domicile,
@@ -88,10 +82,11 @@ def calculer_toutes_distances(session, coord_entreprise):
         session.merge(distance)
 
     session.commit()
-    print(f"{len(a_calculer)} distance(s) calculée(s) en 1 seul appel matrix")
+    print(f"{len(a_calculer)} distance(s) calculée(s)")
+
 
 def valider_declarations(session):
-    """Étape 2 : applique les seuils selon le mode déclaré, sans rappeler l'API."""
+    """Applique les seuils selon le mode déclaré, sans rappeler l'API."""
     salaries = session.query(Salarie).filter(
         Salarie.moyen_deplacement.in_(SEUILS_KM.keys())
     ).all()

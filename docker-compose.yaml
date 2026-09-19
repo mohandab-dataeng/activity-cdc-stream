@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     networks:
       - activity_cdc_network
+    command: postgres -c wal_level=logical
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -77,6 +78,52 @@ services:
     depends_on:
       redpanda:
         condition: service_healthy
+
+
+  kafka-connect:
+    image: debezium/connect:3.0.0.Final
+    container_name: kafka_connect
+    restart: unless-stopped
+    networks:
+      - activity_cdc_network
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: activity-cdc-group
+      CONFIG_STORAGE_TOPIC: debezium_config
+      OFFSET_STORAGE_TOPIC: debezium_offset
+      STATUS_STORAGE_TOPIC: debezium_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  osrm:
+    image: osrm/osrm-backend
+    container_name: osrm
+    restart: unless-stopped
+    networks:
+      - activity_cdc_network
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data/osrm:/data
+    command: osrm-routed --algorithm mld /data/france-latest.osrm
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:5000/route/v1/driving/2.3,48.8;2.4,48.9 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   prometheus:
     image: prom/prometheus:latest

@@ -15,23 +15,25 @@ name = "activity-cdc-stream"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "geopy" },
     { name = "ipykernel" },
     { name = "openpyxl" },
-    { name = "openrouteservice" },
     { name = "pandas" },
     { name = "psycopg2-binary" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "sqlalchemy" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "geopy", specifier = ">=2.5.0" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "openrouteservice", specifier = ">=2.3.3" },
     { name = "pandas", specifier = ">=3.0.5" },
     { name = "psycopg2-binary", specifier = ">=2.9.13" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
+    { name = "requests", specifier = ">=2.34.2" },
     { name = "sqlalchemy", specifier = ">=2.0.54" },
 ]
 
@@ -308,6 +310,27 @@ wheels = [
 ]
 
 [[package]]
+name = "geographiclib"
+version = "2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/df/78/4892343230a9d29faa1364564e525307a37e54ad776ea62c12129dbba704/geographiclib-2.1.tar.gz", hash = "sha256:6a6545e6262d0ed3522e13c515713718797e37ed8c672c31ad7b249f372ef108", size = 37004, upload-time = "2025-08-21T21:34:26Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/b3/802576f2ea5dcb48501bb162e4c7b7b3ca5654a42b2c968ef98a797a4c79/geographiclib-2.1-py3-none-any.whl", hash = "sha256:e2a873b9b9e7fc38721ad73d5f4e6c9ed140d428a339970f505c07056997d40b", size = 40740, upload-time = "2025-08-21T21:34:24.955Z" },
+]
+
+[[package]]
+name = "geopy"
+version = "2.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "geographiclib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/0c/b4e42a0495293f6c94364baba4c657c68bc8d8efec784259cc943f4ba28b/geopy-2.5.0.tar.gz", hash = "sha256:7b6c849f18108dcce4faa3d614e2801107b465f7b05fd3c1db9db12e225ae950", size = 122254, upload-time = "2026-07-12T19:50:06.051Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/66/e5/de8b557b279e31cdfb2070ac83eb45dc7e29bd93cd544128756f658e52c7/geopy-2.5.0-py3-none-any.whl", hash = "sha256:8ad8cc226b505ca4d272ae9a2eeba08b8a2c565fc9a04eaefc33ad49c32b51aa", size = 114619, upload-time = "2026-07-12T19:50:04.839Z" },
+]
+
+[[package]]
 name = "greenlet"
 version = "3.5.6"
 source = { registry = "https://pypi.org/simple" }
@@ -555,18 +578,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050", size = 186464, upload-time = "2024-06-28T14:03:44.161Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2", size = 250910, upload-time = "2024-06-28T14:03:41.161Z" },
-]
-
-[[package]]
-name = "openrouteservice"
-version = "2.3.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c7/c2/2a9784750f244d6f2ae982f7e2862383af4c6d8d9e9ca793603500d04d16/openrouteservice-2.3.3.tar.gz", hash = "sha256:3696e0428533cf6bbcb9586c3bcfca7b5e7aaa269650ff16a862a7f61b857f4a", size = 29130, upload-time = "2021-02-02T19:26:40.918Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/1a/e6944e4cfd7c5386b15e4b4056084b3c8c676aca0a215d8b507a6cbc1263/openrouteservice-2.3.3-py3-none-any.whl", hash = "sha256:a84fe298b1de7a4fb1d8aa19798687f4f66fe212e5206667c703ca2c7e5de0ce", size = 33749, upload-time = "2021-02-02T19:26:39.676Z" },
 ]
 
 [[package]]

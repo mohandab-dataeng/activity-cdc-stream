@@ -5,12 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "geopy>=2.5.0",
     "ipykernel>=7.3.0",
     "openpyxl>=3.1.5",
-    "openrouteservice>=2.3.3",
     "pandas>=3.0.5",
     "psycopg2-binary>=2.9.13",
     "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
     "sqlalchemy>=2.0.54",
 ]
 

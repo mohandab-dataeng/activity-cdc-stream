@@ -7,6 +7,7 @@
 data/bronze/
 data/silver/
 data/checkpoints/
+data/osrm/
 data/raw/*.csv           # si tu gardes un dossier raw pour les fichiers RH bruts
 !data/raw/.gitkeep        # garde le dossier vide visible dans le repo
 
