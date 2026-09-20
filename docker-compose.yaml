@@ -79,6 +79,27 @@ services:
       redpanda:
         condition: service_healthy
 
+  spark:
+    image: apache/spark:3.5.2-python3
+    container_name: spark
+    restart: unless-stopped
+    networks:
+      - activity_cdc_network
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "8090:8080"
+      - "7077:7077"
+      - "4040:4040"
+    volumes:
+      - ./src:/opt/spark-apps/src
+      - ./data:/data
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
 
   kafka-connect:
     image: debezium/connect:3.0.0.Final

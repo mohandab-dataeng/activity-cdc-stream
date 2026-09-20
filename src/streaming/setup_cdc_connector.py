@@ -1,11 +1,12 @@
 """
 setup_cdc_connector.py
-Enregistre le connecteur Debezium PostgreSQL auprès de Kafka Connect,
-pour capturer les changements sur salaries et referentiel_entreprise
-et les publier dans Redpanda.
+Enregistre (ou met à jour) le connecteur Debezium PostgreSQL auprès de
+Kafka Connect, pour capturer les changements sur salaries,
+referentiel_entreprise et activites_sportives, et les publier dans Redpanda.
 """
 
 import requests
+import time
 
 KAFKA_CONNECT_URL = "http://localhost:8083"
 
@@ -19,25 +20,24 @@ CONNECTOR_CONFIG = {
         "database.password": "admin",
         "database.dbname": "sportdata",
         "topic.prefix": "activity_cdc",
-        "table.include.list": "public.salaries,public.referentiel_entreprise",
+        "table.include.list": "public.salaries,public.referentiel_entreprise,public.activites_sportives",
         "plugin.name": "pgoutput",
+        "snapshot.mode": "initial",
     },
 }
 
 
-def connecteur_existe_deja():
-    """Vérifie si le connecteur est déjà enregistré."""
+def supprimer_connecteur_si_existant():
+    """Supprime le connecteur existant pour forcer un nouveau snapshot complet."""
     reponse = requests.get(f"{KAFKA_CONNECT_URL}/connectors")
     reponse.raise_for_status()
-    return CONNECTOR_CONFIG["name"] in reponse.json()
+    if CONNECTOR_CONFIG["name"] in reponse.json():
+        requests.delete(f"{KAFKA_CONNECT_URL}/connectors/{CONNECTOR_CONFIG['name']}")
+        print(f"Ancien connecteur '{CONNECTOR_CONFIG['name']}' supprimé.")
 
 
 def enregistrer_connecteur():
     """Enregistre le connecteur Debezium auprès de Kafka Connect."""
-    if connecteur_existe_deja():
-        print(f"Le connecteur '{CONNECTOR_CONFIG['name']}' existe déjà, aucune action.")
-        return
-
     reponse = requests.post(
         f"{KAFKA_CONNECT_URL}/connectors",
         json=CONNECTOR_CONFIG,
@@ -63,7 +63,10 @@ def verifier_statut():
 
 
 def main():
+    supprimer_connecteur_si_existant()
+    time.sleep(2)
     enregistrer_connecteur()
+    time.sleep(3)
     verifier_statut()
 
 

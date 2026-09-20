@@ -11,7 +11,7 @@ from src.config import DATABASE_URL
 def init_database():
     engine = create_engine(DATABASE_URL)
     Base.metadata.create_all(engine)
-    print("Tables créées avec succès : salaries, referentiel_entreprise")
+    print("Tables créées avec succès")
 
 
 if __name__ == "__main__":

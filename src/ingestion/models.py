@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Date, ForeignKey
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import Boolean, Float
-
+from sqlalchemy import DateTime
 
 Base = declarative_base()
 
@@ -41,3 +41,21 @@ class ValidationDeplacement(Base):
     distance_km = Column(Float, nullable=False)
     seuil_km = Column(Integer, nullable=False)
     est_anomalie = Column(Boolean, nullable=False)
+
+
+class ActiviteSportive(Base):
+    __tablename__ = "activites_sportives"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    id_salarie = Column(Integer, ForeignKey("salaries.id_salarie"), nullable=False)
+    date_debut = Column(DateTime, nullable=False)
+    type_activite = Column(String, nullable=False)
+    distance = Column(Float, nullable=True)  # vide si non pertinent (ex: escalade)
+    date_fin = Column(DateTime, nullable=False)
+    commentaire = Column(String, nullable=True)
+
+class ReferentielSportif(Base):
+    __tablename__ = "referentiel_sportif"
+    id_sport = Column(Integer, primary_key=True, autoincrement=True)
+    type_activite = Column(String, nullable=False, unique=True)
+    categorie = Column(String, nullable=False)
+    eligible_jours_bien_etre = Column(Boolean, nullable=False, default=True)
