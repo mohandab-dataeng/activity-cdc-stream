@@ -101,7 +101,7 @@ activity-cdc-stream/
 - Python 3.13 ou supérieur
 - [uv](https://docs.astral.sh/uv/) comme gestionnaire de paquets et d'environnement
 - Un webhook Slack (pour les notifications d'activité)
-- ~6 Go d'espace disque libre (données OSM pour OSRM)
+- ~6 Go d'espace disque libre (données OSM pour OSRM) garder la capacité de calcul en local
 
 ## Installation
 
