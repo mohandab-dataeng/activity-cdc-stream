@@ -1,9 +1,9 @@
 """
 generate_slack_messages.py
 Consomme le topic Redpanda des activités sportives (alimenté par Debezium)
-et poste un message de félicitations sur Slack pour chaque nouvelle activité.
-Le snapshot initial (historique déjà en base au démarrage du connecteur) est
-ignoré : seules les nouvelles insertions déclenchent un message Slack.
+et poste un message de félicitations sur Slack pour chaque NOUVELLE activité.
+Ignore tout l'historique/snapshot : ne traite que ce qui arrive après
+le démarrage du script (auto.offset.reset=latest).
 """
 
 import json
@@ -20,7 +20,6 @@ TOPIC = "activity_cdc.public.activites_sportives"
 
 
 def recuperer_nom_salarie(session, id_salarie):
-    """Récupère le prénom et nom d'un salarié depuis PostgreSQL."""
     salarie = session.get(Salarie, id_salarie)
     if salarie is None:
         return f"Salarié {id_salarie}"
@@ -28,7 +27,6 @@ def recuperer_nom_salarie(session, id_salarie):
 
 
 def formater_message(session, activite):
-    """Construit le texte du message Slack pour une activité."""
     nom = recuperer_nom_salarie(session, activite["id_salarie"])
     type_activite = activite["type_activite"]
 
@@ -55,7 +53,6 @@ def formater_message(session, activite):
 
 
 def envoyer_message_slack(texte):
-    """Poste le message sur Slack via le webhook."""
     reponse = requests.post(SLACK_WEBHOOK_URL, json={"text": texte})
     reponse.raise_for_status()
 
@@ -65,12 +62,12 @@ def main():
 
     consumer = Consumer({
         "bootstrap.servers": REDPANDA_BROKERS,
-        "group.id": "slack-notifier-group",
-        "auto.offset.reset": "earliest",
+        "group.id": "slack-notifier-group-v2",
+        "auto.offset.reset": "latest",
     })
     consumer.subscribe([TOPIC])
 
-    print(f"En écoute sur le topic '{TOPIC}'... (Ctrl+C pour arrêter)")
+    print(f"En écoute sur le topic '{TOPIC}' (nouvelles entrées uniquement)... (Ctrl+C pour arrêter)")
 
     try:
         with Session(engine) as session:
@@ -84,11 +81,11 @@ def main():
 
                 payload = json.loads(message.value())
                 if payload.get("payload") is None:
-                    continue  # message de contrôle Debezium, pas une vraie activité
+                    continue
 
                 donnees = payload["payload"]
                 if donnees["source"].get("snapshot") in ("true", "last"):
-                    continue  # on ignore le snapshot initial
+                    continue
 
                 activite = donnees["after"]
                 if activite is None:
