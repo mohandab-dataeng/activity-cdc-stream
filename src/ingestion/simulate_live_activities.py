@@ -16,7 +16,7 @@ from src.config import DATABASE_URL
 from src.ingestion.models import Salarie
 from src.ingestion.generate_strava_data import generer_activite
 
-INTERVALLE_SECONDES = 30
+INTERVALLE_SECONDES = 120
 
 
 def main():

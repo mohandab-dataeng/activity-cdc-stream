@@ -129,6 +129,20 @@ services:
       timeout: 10s
       retries: 5
 
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka_exporter
+    restart: unless-stopped
+    networks:
+      - activity_cdc_network
+    command:
+      - --kafka.server=redpanda:9092
+    ports:
+      - "9308:9308"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
   osrm:
     image: osrm/osrm-backend
     container_name: osrm
@@ -140,11 +154,6 @@ services:
     volumes:
       - ./data/osrm:/data
     command: osrm-routed --algorithm mld /data/france-latest.osrm
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:5000/route/v1/driving/2.3,48.8;2.4,48.9 || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
 
   prometheus:
     image: prom/prometheus:latest

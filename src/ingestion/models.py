@@ -1,7 +1,10 @@
-from sqlalchemy import create_engine, Column, Integer, String, Date, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Date, ForeignKey, DateTime, Numeric
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import Boolean, Float
 from sqlalchemy import DateTime
+from datetime import datetime
+
+
 
 Base = declarative_base()
 
@@ -59,3 +62,10 @@ class ReferentielSportif(Base):
     type_activite = Column(String, nullable=False, unique=True)
     categorie = Column(String, nullable=False)
     eligible_jours_bien_etre = Column(Boolean, nullable=False, default=True)
+
+class ConfigAvantage(Base):
+    __tablename__ = "config_avantages"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cle = Column(String, nullable=False)
+    valeur = Column(Numeric(10, 4), nullable=False)
+    date_effet = Column(DateTime, nullable=False, default=datetime.now)

@@ -6,8 +6,12 @@ Lit la couche silver (Delta Lake, via pandas) et les données PostgreSQL,
 """
 
 import glob
+from datetime import datetime
+
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, Float, Boolean
+from sqlalchemy import (
+    create_engine, Column, Integer, Float, Boolean, String, Numeric, DateTime, text,
+)
 from sqlalchemy.orm import Session, declarative_base
 
 from src.config import DATABASE_URL
@@ -15,7 +19,6 @@ from src.ingestion.models import Salarie, ValidationDeplacement
 
 SILVER_PATH = "data/silver/activites_finales"
 SEUIL_ACTIVITES_BIEN_ETRE = 15
-TAUX_PRIME = 0.05
 JOURS_BIEN_ETRE = 5
 
 Base = declarative_base()
@@ -31,6 +34,14 @@ class KpiSalarie(Base):
     jours_bien_etre_accordes = Column(Integer, nullable=False)
 
 
+class ConfigAvantage(Base):
+    __tablename__ = "config_avantages"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cle = Column(String, nullable=False)
+    valeur = Column(Numeric, nullable=False)
+    date_effet = Column(DateTime, nullable=False, default=datetime.now)
+
+
 def charger_activites_silver():
     """Lit tous les fichiers Parquet de la couche silver avec pandas."""
     fichiers_parquet = glob.glob(f"{SILVER_PATH}/*.parquet")
@@ -38,8 +49,42 @@ def charger_activites_silver():
     return df
 
 
+def creer_trigger(engine):
+    """Crée le trigger Postgres qui recalcule les primes à chaque changement de taux."""
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE OR REPLACE FUNCTION maj_montant_prime() RETURNS trigger AS $$
+            BEGIN
+              IF NEW.cle = 'taux_prime' THEN
+                UPDATE kpis_salaries k
+                SET montant_prime = s.salaire_brut * NEW.valeur
+                FROM salaries s
+                WHERE s.id_salarie = k.id_salarie
+                  AND k.eligible_prime_sportive = true;
+              END IF;
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        conn.execute(text("DROP TRIGGER IF EXISTS trg_maj_montant_prime ON config_avantages;"))
+        conn.execute(text("""
+            CREATE TRIGGER trg_maj_montant_prime
+            AFTER INSERT ON config_avantages
+            FOR EACH ROW EXECUTE FUNCTION maj_montant_prime();
+        """))
+        conn.commit()
+
+
 def calculer_kpis(session, df_activites):
     """Calcule les KPI pour chaque salarié."""
+    config = (
+        session.query(ConfigAvantage)
+        .filter(ConfigAvantage.cle == "taux_prime")
+        .order_by(ConfigAvantage.id.desc())
+        .first()
+    )
+    taux_prime = float(config.valeur)
+
     salaries = session.query(Salarie).all()
     resultats = []
 
@@ -57,7 +102,7 @@ def calculer_kpis(session, df_activites):
             and not validation.est_anomalie
         )
 
-        montant_prime = salarie.salaire_brut * TAUX_PRIME if eligible_prime else 0.0
+        montant_prime = salarie.salaire_brut * taux_prime if eligible_prime else 0.0
         jours_accordes = JOURS_BIEN_ETRE if eligible_bien_etre else 0
 
         resultats.append(KpiSalarie(
@@ -75,6 +120,12 @@ def calculer_kpis(session, df_activites):
 def main():
     engine = create_engine(DATABASE_URL)
     Base.metadata.create_all(engine)
+    creer_trigger(engine)
+
+    with Session(engine) as session:
+        if session.query(ConfigAvantage).filter_by(cle="taux_prime").first() is None:
+            session.add(ConfigAvantage(cle="taux_prime", valeur=0.05))
+            session.commit()
 
     df_activites = charger_activites_silver()
     print(f"{len(df_activites)} activités chargées depuis la couche silver")

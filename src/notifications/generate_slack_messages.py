@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from src.config import DATABASE_URL, SLACK_WEBHOOK_URL
 from src.ingestion.models import Salarie
 
+import time
+
 REDPANDA_BROKERS = "localhost:19092"
 TOPIC = "activity_cdc.public.activites_sportives"
 
@@ -56,7 +58,7 @@ def envoyer_message_slack(texte):
     reponse = requests.post(SLACK_WEBHOOK_URL, json={"text": texte})
     reponse.raise_for_status()
 
-
+    
 def main():
     engine = create_engine(DATABASE_URL)
 
@@ -93,6 +95,7 @@ def main():
 
                 texte = formater_message(session, activite)
                 envoyer_message_slack(texte)
+                time.sleep(1.5)
                 print(f"Message envoyé : {texte}")
 
     except KeyboardInterrupt:
