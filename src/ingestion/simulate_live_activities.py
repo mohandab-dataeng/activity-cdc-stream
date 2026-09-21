@@ -1,6 +1,6 @@
 """
 simulate_live_activities.py
-Insère une nouvelle activité sportive toutes les 30 secondes, pour simuler
+Insère une nouvelle activité sportive toutes les 60 secondes, pour simuler
 un flux "live" et tester la chaîne CDC -> Redpanda -> Spark -> Slack en démonstration.
 Réutilise la logique de génération de generate_strava_data.py.
 """
@@ -16,7 +16,7 @@ from src.config import DATABASE_URL
 from src.ingestion.models import Salarie
 from src.ingestion.generate_strava_data import generer_activite
 
-INTERVALLE_SECONDES = 120
+INTERVALLE_SECONDES = 60
 
 
 def main():
@@ -30,12 +30,15 @@ def main():
         try:
             while True:
                 salarie = random.choice(salaries)
-                activite = generer_activite(salarie.id_salarie, datetime.now())
+                id_salarie, prenom, nom = salarie.id_salarie, salarie.prenom, salarie.nom
+
+                activite = generer_activite(id_salarie, datetime.now())
+                type_activite = activite.type_activite
                 session.add(activite)
                 session.commit()
 
-                print(f"Activité insérée pour salarié {salarie.id_salarie} "
-                      f"({salarie.prenom} {salarie.nom}) : {activite.type_activite}")
+                print(f"Activité insérée pour salarié {id_salarie} "
+                      f"({prenom} {nom}) : {type_activite}")
 
                 time.sleep(INTERVALLE_SECONDES)
 

@@ -5,15 +5,18 @@ le référentiel entreprise (via salaries) et le référentiel sportif,
 puis écrit le résultat en Delta Lake (couche silver).
 """
 
+import os
+
 from pyspark.sql import SparkSession
 
 BRONZE_PATH = "/data/bronze/activites_enrichies"
 SILVER_PATH = "/data/silver/activites_finales"
 CHECKPOINT_PATH = "/data/checkpoints/silver_activites"
 
-POSTGRES_JDBC_URL = "jdbc:postgresql://postgres:5432/sportdata"
-POSTGRES_USER = "admin"
-POSTGRES_PASSWORD = "admin"
+POSTGRES_DB = os.getenv("POSTGRES_DB", "sportdata")
+POSTGRES_JDBC_URL = f"jdbc:postgresql://postgres:5432/{POSTGRES_DB}"
+POSTGRES_USER = os.getenv("POSTGRES_USER", "admin")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "admin")
 
 
 def lire_referentiel(spark, table, colonnes=None):

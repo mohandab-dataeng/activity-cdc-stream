@@ -4,6 +4,7 @@ Insère les catégories de sport dans le référentiel sportif.
 """
 
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from src.config import DATABASE_URL
@@ -28,12 +29,15 @@ def main():
     engine = create_engine(DATABASE_URL)
     with Session(engine) as session:
         for type_activite, categorie, eligible in SPORTS:
-            sport = ReferentielSportif(
+            stmt = insert(ReferentielSportif).values(
                 type_activite=type_activite,
                 categorie=categorie,
                 eligible_jours_bien_etre=eligible,
+            ).on_conflict_do_update(
+                index_elements=["type_activite"],
+                set_={"categorie": categorie, "eligible_jours_bien_etre": eligible},
             )
-            session.merge(sport)
+            session.execute(stmt)
         session.commit()
         print(f"{len(SPORTS)} types de sport insérés dans referentiel_sportif")
 

@@ -12,12 +12,11 @@ from confluent_kafka import Consumer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.config import DATABASE_URL, SLACK_WEBHOOK_URL
+from src.config import DATABASE_URL, REDPANDA_BROKERS, SLACK_WEBHOOK_URL
 from src.ingestion.models import Salarie
 
 import time
 
-REDPANDA_BROKERS = "localhost:19092"
 TOPIC = "activity_cdc.public.activites_sportives"
 
 

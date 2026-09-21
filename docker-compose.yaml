@@ -3,6 +3,7 @@ networks:
     name: activity_cdc_network
     driver: bridge
 
+
 services:
   postgres:
     image: postgres:16
@@ -24,6 +25,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
 
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:latest
@@ -55,6 +57,7 @@ services:
       timeout: 5s
       retries: 5
 
+
   redpanda-console:
     image: docker.redpanda.com/redpandadata/console:latest
     container_name: redpanda_console
@@ -79,6 +82,7 @@ services:
       redpanda:
         condition: service_healthy
 
+
   spark:
     image: apache/spark:3.5.2-python3
     container_name: spark
@@ -100,6 +104,7 @@ services:
       postgres:
         condition: service_healthy
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+
 
   kafka-connect:
     image: debezium/connect:3.0.0.Final
@@ -129,6 +134,7 @@ services:
       timeout: 10s
       retries: 5
 
+
   kafka-exporter:
     image: danielqsj/kafka-exporter:latest
     container_name: kafka_exporter
@@ -143,6 +149,7 @@ services:
       redpanda:
         condition: service_healthy
 
+
   osrm:
     image: osrm/osrm-backend
     container_name: osrm
@@ -154,6 +161,7 @@ services:
     volumes:
       - ./data/osrm:/data
     command: osrm-routed --algorithm mld /data/france-latest.osrm
+
 
   prometheus:
     image: prom/prometheus:latest
@@ -171,6 +179,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
 
   grafana:
     image: grafana/grafana:latest
@@ -195,6 +204,7 @@ services:
       prometheus:
         condition: service_healthy
 
+
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
@@ -214,9 +224,61 @@ services:
       retries: 5
       start_period: 40s
 
+
+  kestra:
+    image: kestra/kestra:latest
+    pull_policy: always
+    user: root
+    command: server standalone
+    volumes:
+      # Socket Docker pour piloter les conteneurs frères (spark, etc.)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Montage du projet pour que Kestra puisse exécuter les scripts Python
+      - .:/app/project
+      # Persistence interne Kestra
+      - kestra_data:/app/storage
+      # Import automatique des flows au démarrage
+      - ./kestra/flows:/app/flows:ro
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/sportdata
+            driverClassName: org.postgresql.Driver
+            username: ${POSTGRES_USER:-postgres}
+            password: ${POSTGRES_PASSWORD:-postgres}
+        kestra:
+          queue:
+            type: postgres
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+          plugins:
+            configurations:
+              - type: io.kestra.plugin.scripts.runner.docker.Docker
+                values:
+                  volume-enabled: true
+    ports:
+      - "8085:8080"   # 8082 car 8080 est pris par Redpanda Console
+    networks:
+      - activity_cdc_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/configs || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 volumes:
   postgres_data:
   redpanda_data:
   prometheus_data:
   grafana_data:
   metabase_data:
+  kestra_data:

@@ -1,0 +1,51 @@
+id: refresh-kpis
+namespace: sportdata
+description: |
+  Recalcule périodiquement les KPI (prime sportive, jours bien-être) à
+  partir de la couche silver, pour que la table kpis_salaries lue par
+  Metabase reste à jour au fil des nouvelles activités ingérées par le
+  streaming (activity-cdc-pipeline reste l'orchestration complète,
+  à lancer explicitement ; ce flow ne fait que le recalcul récurrent).
+
+labels:
+  project: activity-cdc-stream
+  env: poc
+
+inputs:
+  - id: host_project_dir
+    type: STRING
+    defaults: "/home/mohamed/Formation/Data Engineer/Projet 12 Gérez un projet d'infrastructure/activity-cdc-stream"
+    description: Chemin du projet sur l'hôte Docker, pour monter data/ (couche silver).
+
+  - id: pipeline_image
+    type: STRING
+    defaults: activity-cdc-stream-pipeline:latest
+    description: Image Docker buildée depuis le Dockerfile du projet.
+
+variables:
+  pipeline_env:
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: "{{ kv('POSTGRES_DB') }}"
+    POSTGRES_USER: "{{ kv('POSTGRES_USER') }}"
+    POSTGRES_PASSWORD: "{{ kv('POSTGRES_PASSWORD') }}"
+
+tasks:
+  - id: calculer_kpis
+    type: io.kestra.plugin.scripts.shell.Commands
+    description: "Calcul KPIs par salarié (primes + jours bien-être) depuis silver"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: activity_cdc_network
+      volumes:
+        - "{{ inputs.host_project_dir }}/data:/app/data"
+    containerImage: "{{ inputs.pipeline_image }}"
+    env: "{{ vars.pipeline_env }}"
+    commands:
+      - cd /app && python -m src.analytics.compute_kpis
+
+triggers:
+  - id: recalcul_periodique
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "*/2 * * * *"
+    description: "Recalcule les KPI toutes les 2 minutes"

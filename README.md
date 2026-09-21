@@ -1,6 +1,6 @@
 # activity-cdc-stream
 
-Real-time CDC pipeline: PostgreSQL → Redpanda → PySpark Structured Streaming → Delta Lake. Includes Great Expectations data quality checks, Grafana/Prometheus monitoring, and Metabase BI dashboards. Built for a fictional employee wellness incentive program (POC).
+Real-time CDC pipeline: PostgreSQL → Redpanda → PySpark Structured Streaming → Delta Lake. Includes Great Expectations data quality checks, Grafana/Prometheus monitoring, Metabase BI dashboards, and Kestra orchestration. Built for a fictional employee wellness incentive program (POC).
 
 ## Contexte
 
@@ -31,6 +31,8 @@ Strava-like generation (Python) → PostgreSQL
 
 Le pipeline suit une architecture medallion (bronze / silver) : le premier job Spark écrit les données brutes telles qu'elles arrivent du topic, sans transformation ni enrichissement — cohérent avec la pratique standard de l'industrie, qui recommande de garder une couche brute rejouable en cas d'erreur en aval. Le second job lit cette couche bronze, l'enrichit avec les référentiels (entreprise et sportif), et écrit le résultat final en couche silver, prête pour le calcul des KPI.
 
+L'ensemble de ce pipeline (étapes batch, démarrage des jobs Spark, notifier Slack) est orchestré par **Kestra**, qui remplace le lancement manuel de chaque script dans des terminaux séparés. Un second flow Kestra recalcule périodiquement les KPI pour que la table `kpis_salaries` (lue par Metabase) reste à jour au fil du streaming. Voir la section [Orchestration avec Kestra](#orchestration-avec-kestra).
+
 ## Stack technique et justifications
 
 | Composant | Outil | Justification |
@@ -45,15 +47,21 @@ Le pipeline suit une architecture medallion (bronze / silver) : le premier job S
 | Distance routière domicile-travail | OSRM (auto-hébergé) | Gratuit et illimité une fois les données téléchargées, aucune dépendance à un service tiers avec quota ou clé API |
 | Monitoring du pipeline | Prometheus + Grafana | Exigence explicite de la note de cadrage ; métriques natives Redpanda (débit, volumétrie) exposées nativement sans instrumentation supplémentaire |
 | Restitution BI | Metabase | Équivalent open source à Power BI ; dashboards avec auto-refresh, persistance via volume Docker |
+| Orchestration | Kestra | Open source, pilote Docker nativement (exécution des tâches Python dans des conteneurs isolés, démarrage des jobs Spark et du consumer Slack), UI de suivi des exécutions, planification par cron pour le recalcul périodique des KPI |
 
 ## Structure du projet
 
 ```
 activity-cdc-stream/
-├── main.py                    # Orchestration du pipeline batch
-├── docker-compose.yml
+├── main.py                    # Orchestration du pipeline batch (alternative locale à Kestra)
+├── Dockerfile                  # Image utilisée par Kestra pour exécuter les tâches Python
+├── docker-compose.yaml
 ├── pyproject.toml
-├── .env.example
+├── .env.exemple
+├── kestra/
+│   └── flows/
+│       ├── activity-cdc-pipeline.yaml   # Flow principal : batch + streaming + KPI
+│       └── refresh-kpis.yaml            # Flow planifié : recalcul périodique des KPI
 ├── config/
 │   ├── prometheus/
 │   │   └── prometheus.yml
@@ -171,7 +179,59 @@ docker compose up -d osrm
 
 Déposer les fichiers Excel fournis par les RH dans `data/raw/` (noms contenant `RH` et `Sportive`, le chargement les retrouve automatiquement par motif).
 
-## Lancer le pipeline batch complet
+## Orchestration avec Kestra
+
+Le pipeline peut être piloté entièrement depuis Kestra (`docker compose up -d kestra`, interface sur `http://localhost:8085`), plutôt que de lancer chaque script manuellement. C'est l'approche recommandée : elle enchaîne le batch, démarre les jobs Spark et le consumer Slack, et calcule les KPI en une seule exécution suivie depuis l'UI.
+
+### 1. Builder l'image utilisée par les tâches Python
+
+Les tâches Python du flow s'exécutent dans des conteneurs Docker isolés (et non dans le conteneur Kestra lui-même, qui n'a pas les dépendances du projet). Il faut construire cette image une première fois, puis à chaque modification du code source :
+
+```bash
+docker build -t activity-cdc-stream-pipeline:latest .
+```
+
+### 2. Renseigner le KV Store
+
+Les identifiants sensibles (mot de passe PostgreSQL, webhook Slack) ne sont jamais écrits en dur dans les flows : ils sont lus depuis le KV Store de Kestra, namespace `sportdata`. À renseigner une fois, via l'UI (**Namespaces → sportdata → KV Store → Create**) :
+
+| Clé | Exemple de valeur |
+|---|---|
+| `POSTGRES_DB` | `sportdata` |
+| `POSTGRES_USER` | `admin` |
+| `POSTGRES_PASSWORD` | `admin` |
+| `REDPANDA_TOPIC` | `activites_sportives` |
+| `SLACK_WEBHOOK_URL` | `<votre webhook Slack>` |
+
+### 3. Importer les flows
+
+Les définitions de flows sont versionnées dans `kestra/flows/` mais ne sont pas rechargées automatiquement par Kestra après le premier démarrage. Les importer manuellement dans l'UI (**Flows → Create**, en collant le contenu du fichier) :
+
+- `activity-cdc-pipeline.yaml` — pipeline complet (batch, jobs Spark, notifier Slack, calcul des KPI)
+- `refresh-kpis.yaml` — recalcul périodique des KPI (déclenché toutes les 2 minutes par un trigger `Schedule`)
+
+### 4. Exécuter le pipeline
+
+Depuis l'UI, ouvrir `sportdata / activity-cdc-pipeline` et cliquer sur **Execute**. Les inputs disponibles :
+
+| Input | Défaut | Usage |
+|---|---|---|
+| `host_project_dir` | chemin absolu du projet | Chemin du dépôt sur l'hôte Docker (pas dans le conteneur Kestra) — sert à monter `data/` dans les conteneurs éphémères créés par les tâches |
+| `pipeline_image` | `activity-cdc-stream-pipeline:latest` | Image buildée à l'étape 1 |
+| `run_quality_checks` | `true` | Lance les checks Great Expectations après le batch |
+| `run_live_simulation` | `false` | Démarre `simulate_live_activities.py` en arrière-plan (démo en direct) |
+
+Le flow enchaîne : initialisation de la base, chargement RH, référentiel sportif, validation des déplacements, connecteur CDC, génération de l'historique d'activités, puis démarre en arrière-plan les jobs Spark bronze/silver et le consumer Slack, avant de calculer les KPI.
+
+### Points d'attention
+
+- **Processus longs, pas de tâches bloquantes.** Les jobs Spark, le consumer Slack et la simulation live sont des boucles infinies : le flow les démarre en arrière-plan (`docker exec -d` / `docker run -d`) plutôt que de les exécuter comme des tâches Kestra classiques, qui ne se termineraient jamais.
+- **Pas d'accumulation entre exécutions.** Avant de démarrer un nouveau consumer Slack ou une nouvelle simulation live, le flow arrête et supprime tout conteneur du même type restant d'une exécution précédente — sans cela, plusieurs consumers coexisteraient sur le même groupe Kafka et fausseraient le lag affiché dans Grafana.
+- **Recalcul des KPI.** `compute_kpis.py` reste un script batch : il ne se déclenche pas tout seul quand une nouvelle activité arrive. Le flow `refresh-kpis` comble ce manque en le relançant automatiquement toutes les 2 minutes, pour que Metabase reflète les données à jour.
+
+## Lancer le pipeline manuellement (sans Kestra)
+
+Pour un lancement local, sans passer par Kestra :
 
 ```bash
 uv run python main.py
@@ -202,12 +262,15 @@ Pour simuler un flux d'activités en continu (utile pour la démonstration) :
 uv run python src/ingestion/simulate_live_activities.py
 ```
 
-Ce script insère une nouvelle activité aléatoire toutes les 30 secondes, ce qui déclenche en cascade : capture par Debezium, publication dans Redpanda, traitement par les deux jobs Spark, et envoi d'une notification Slack — visible en temps réel sur les interfaces suivantes.
+Ce script insère une nouvelle activité aléatoire toutes les 60 secondes, ce qui déclenche en cascade : capture par Debezium, publication dans Redpanda, traitement par les deux jobs Spark, et envoi d'une notification Slack — visible en temps réel sur les interfaces suivantes.
+
+Cette même simulation peut aussi être démarrée depuis Kestra, en exécutant `activity-cdc-pipeline` avec l'input `run_live_simulation` à `true` (voir [Orchestration avec Kestra](#orchestration-avec-kestra)).
 
 ## Interfaces disponibles
 
 | Service | URL | Usage |
 |---|---|---|
+| Kestra | http://localhost:8085 | Orchestration : exécution et suivi des flows, KV Store |
 | Redpanda Console | http://localhost:8080 | Suivi des topics, messages, consumer groups |
 | Prometheus | http://localhost:9090 | Requêtes brutes sur les métriques du pipeline |
 | Grafana | http://localhost:3000 | Dashboards de monitoring (volumétrie, débit) |
@@ -244,6 +307,7 @@ Ce script applique, via Great Expectations, les règles suivantes sur la couche 
 
 ## Limites connues et pistes d'évolution
 
-- Le calcul des KPI (`compute_kpis.py`) est un script batch à relancer manuellement après une mise à jour des données ; une orchestration par Dagster ou Airflow permettrait de planifier ce recalcul et d'en assurer la reprise automatique en cas d'échec.
+- Le calcul des KPI (`compute_kpis.py`) reste un script batch, sans mécanisme de streaming propre ; le flow Kestra `refresh-kpis` compense en le relançant toutes les 2 minutes, mais une reprise automatique en cas d'échec (retry, alerting) reste à ajouter.
+- Le lag du consumer Slack (visible dans Grafana) peut sembler élevé après une regénération massive de l'historique d'activités (`generer_activites`), car chaque message est espacé d'un court délai côté consumer avant l'envoi Slack ; il redescend progressivement sans action requise.
 - Les référentiels ne bénéficient pas d'un CDC dédié, contrairement aux activités sportives ; ce choix a été fait car la note de cadrage ne demande pas de capture en temps réel pour les référentiels eux-mêmes, mais qu'une synchronisation régulière pourrait être ajoutée si leur fréquence de mise à jour l'exigeait.
 - L'intégration directe avec l'API Strava, mentionnée comme cible finale dans la note de cadrage, n'est pas implémentée dans ce POC ; les données sont simulées de manière cohérente avec les profils RH réels.

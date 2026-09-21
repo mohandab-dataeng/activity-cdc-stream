@@ -5,10 +5,12 @@ Kafka Connect, pour capturer les changements sur salaries,
 referentiel_entreprise et activites_sportives, et les publier dans Redpanda.
 """
 
+import os
+
 import requests
 import time
 
-KAFKA_CONNECT_URL = "http://localhost:8083"
+KAFKA_CONNECT_URL = os.getenv("KAFKA_CONNECT_URL", "http://localhost:8083")
 
 CONNECTOR_CONFIG = {
     "name": "postgres-activites-connector",
@@ -16,9 +18,9 @@ CONNECTOR_CONFIG = {
         "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
         "database.hostname": "postgres",
         "database.port": "5432",
-        "database.user": "admin",
-        "database.password": "admin",
-        "database.dbname": "sportdata",
+        "database.user": os.getenv("POSTGRES_USER", "admin"),
+        "database.password": os.getenv("POSTGRES_PASSWORD", "admin"),
+        "database.dbname": os.getenv("POSTGRES_DB", "sportdata"),
         "topic.prefix": "activity_cdc",
         "table.include.list": "public.salaries,public.referentiel_entreprise,public.activites_sportives",
         "plugin.name": "pgoutput",

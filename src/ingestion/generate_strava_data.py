@@ -16,8 +16,6 @@ from src.ingestion.models import Salarie, ActiviteSportive
 
 import glob
 
-CHEMIN_SPORT = glob.glob("data/raw/*Sportive*.xlsx")[0]
-
 TYPES_ACTIVITE = [
     "Course à pied", "Randonnée", "Vélo", "Natation",
     "Football", "Basketball", "Tennis", "Badminton",
@@ -70,7 +68,8 @@ def determiner_frequence(pratique_sport):
 
 def main():
     engine = create_engine(DATABASE_URL)
-    df_sport = pd.read_excel(CHEMIN_SPORT)
+    chemin_sport = glob.glob("data/raw/*Sportive*.xlsx")[0]
+    df_sport = pd.read_excel(chemin_sport)
 
     with Session(engine) as session:
         salaries = session.query(Salarie).all()

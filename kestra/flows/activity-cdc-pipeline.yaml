@@ -1,0 +1,355 @@
+id: activity-cdc-pipeline
+namespace: sportdata
+description: |
+  Pipeline complet Activity CDC Stream — POC Avantages Sportifs
+  Batch (init → RH → référentiels → validation → CDC → génération → KPIs)
+  puis démarrage en arrière-plan du streaming (Spark bronze + silver)
+  et du notifier Slack, avant le calcul final des KPIs.
+
+labels:
+  project: activity-cdc-stream
+  env: poc
+
+inputs:
+  - id: project_dir
+    type: STRING
+    defaults: /app/project
+    description: Chemin du projet monté dans le conteneur Kestra
+
+  - id: host_project_dir
+    type: STRING
+    defaults: "/home/mohamed/Formation/Data Engineer/Projet 12 Gérez un projet d'infrastructure/activity-cdc-stream"
+    description: >
+      Chemin du projet sur l'HÔTE Docker (pas dans le conteneur Kestra).
+      Requis pour monter data/ dans les conteneurs éphémères créés par le
+      taskRunner Docker, qui tournent sur le daemon Docker de l'hôte — le
+      socket monté dans Kestra ne donne accès qu'à ce daemon, pas aux
+      chemins internes du conteneur Kestra lui-même.
+
+  - id: pipeline_image
+    type: STRING
+    defaults: activity-cdc-stream-pipeline:latest
+    description: Image Docker (buildée depuis le Dockerfile du projet) utilisée pour exécuter les tâches Python avec leurs dépendances
+
+  - id: run_quality_checks
+    type: BOOL
+    defaults: true
+    description: Lancer les checks Great Expectations après le batch
+
+  - id: run_live_simulation
+    type: BOOL
+    defaults: false
+    description: Lancer la simulation live (démo soutenance)
+
+variables:
+  # Rien en dur : secrets et identifiants lus depuis le KV Store Kestra
+  # (namespace sportdata), à renseigner une fois via l'UI ou la CLI Kestra
+  # avant le premier run (voir README section Kestra).
+  pipeline_env:
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: "{{ kv('POSTGRES_DB') }}"
+    POSTGRES_USER: "{{ kv('POSTGRES_USER') }}"
+    POSTGRES_PASSWORD: "{{ kv('POSTGRES_PASSWORD') }}"
+    REDPANDA_BROKERS: "redpanda:9092"
+    REDPANDA_TOPIC: "{{ kv('REDPANDA_TOPIC') }}"
+    OSRM_URL: "http://osrm:5000"
+    KAFKA_CONNECT_URL: "http://kafka-connect:8083"
+
+tasks:
+  # ============================================================
+  # PHASE 1 — BATCH SÉQUENTIEL
+  # ============================================================
+  - id: batch
+    type: io.kestra.plugin.core.flow.Sequential
+    description: "Étapes batch exécutées dans l'ordre"
+    tasks:
+
+      - id: init_database
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Création des tables PostgreSQL (idempotent)"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.ingestion.init_database
+
+      - id: charger_rh
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Chargement fichiers Excel RH + déclarations sportives"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+          volumes:
+            - "{{ inputs.host_project_dir }}/data:/app/data"
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.ingestion.load_rh_data
+
+      - id: peupler_referentiel_sportif
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Insertion des 11 types de sport dans le référentiel"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.ingestion.populate_referentiel_sportif
+
+      - id: valider_declarations
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Géocodage + calcul distances OSRM + validation anomalies"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.validation.validate_declarations
+
+      - id: configurer_cdc
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Enregistrement connecteur Debezium sur Kafka Connect"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.streaming.setup_cdc_connector
+
+      - id: wait_cdc_ready
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Attente que le connecteur Debezium soit RUNNING"
+        taskRunner:
+          type: io.kestra.plugin.core.runner.Process
+        commands:
+          - |
+            echo "Attente du connecteur Debezium..."
+            for i in $(seq 1 30); do
+              STATUS=$(curl -s http://kafka-connect:8083/connectors/postgres-activites-connector/status | python3 -c "import sys,json; print(json.load(sys.stdin)['connector']['state'])" 2>/dev/null)
+              if [ "$STATUS" = "RUNNING" ]; then
+                echo "Connecteur Debezium RUNNING"
+                exit 0
+              fi
+              echo "Tentative $i/30 — statut: $STATUS"
+              sleep 5
+            done
+            echo "ERREUR: connecteur Debezium non prêt après 150s"
+            exit 1
+
+      - id: generer_activites
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Génération historique 12 mois d'activités sportives simulées"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+          volumes:
+            - "{{ inputs.host_project_dir }}/data:/app/data"
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.ingestion.generate_strava_data
+
+  # ============================================================
+  # PHASE 2 — DÉMARRAGE DES PROCESSUS LONGS (fire-and-forget)
+  # ============================================================
+  # spark_bronze, spark_silver et slack_notifier sont des boucles
+  # infinies (streaming). On ne peut pas les exécuter comme des
+  # tâches Kestra bloquantes : le flow ne se terminerait jamais et
+  # post_streaming (calcul des KPIs) ne s'exécuterait jamais.
+  # On les démarre donc en arrière-plan (docker exec -d / docker run -d)
+  # et on continue immédiatement.
+  - id: streaming
+    type: io.kestra.plugin.core.flow.Sequential
+    description: "Démarrage des jobs Spark streaming + Slack notifier en arrière-plan"
+    tasks:
+
+      - id: start_spark_bronze
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Démarre le job Spark bronze en arrière-plan dans le conteneur spark"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          volumes:
+            - "/var/run/docker.sock:/var/run/docker.sock"
+        containerImage: docker:cli
+        commands:
+          - |
+            docker exec -d spark sh -c '/opt/spark/bin/spark-submit \
+              --conf "spark.jars.ivy=/tmp/.ivy2" \
+              --packages io.delta:delta-spark_2.12:3.2.0,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.2,org.postgresql:postgresql:42.7.4 \
+              --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+              --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" \
+              --conf "spark.ui.port=4040" \
+              --conf "spark.ui.prometheus.enabled=true" \
+              --conf "spark.sql.streaming.metricsEnabled=true" \
+              --conf "spark.metrics.conf.*.sink.prometheusServlet.class=org.apache.spark.metrics.sink.PrometheusServlet" \
+              --conf "spark.metrics.conf.*.sink.prometheusServlet.path=/metrics/prometheus" \
+              /opt/spark-apps/src/streaming/spark_transform_enrich.py > /data/spark_bronze.log 2>&1'
+            echo "Job Spark bronze démarré en arrière-plan (log : data/spark_bronze.log)"
+
+      - id: wait_bronze_delta
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Attente que le job bronze ait créé la table Delta"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          volumes:
+            - "/var/run/docker.sock:/var/run/docker.sock"
+        containerImage: docker:cli
+        commands:
+          - |
+            echo "Attente couche bronze Delta..."
+            for i in $(seq 1 60); do
+              if docker exec spark test -d /data/bronze/activites_enrichies/_delta_log 2>/dev/null; then
+                echo "Couche bronze détectée"
+                exit 0
+              fi
+              echo "Tentative $i/60..."
+              sleep 5
+            done
+            echo "ERREUR: couche bronze non détectée après 300s"
+            exit 1
+
+      - id: start_spark_silver
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Démarre le job Spark silver en arrière-plan dans le conteneur spark"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          volumes:
+            - "/var/run/docker.sock:/var/run/docker.sock"
+        containerImage: docker:cli
+        commands:
+          - |
+            docker exec -d \
+              -e POSTGRES_DB="{{ kv('POSTGRES_DB') }}" \
+              -e POSTGRES_USER="{{ kv('POSTGRES_USER') }}" \
+              -e POSTGRES_PASSWORD="{{ kv('POSTGRES_PASSWORD') }}" \
+              spark sh -c '/opt/spark/bin/spark-submit \
+              --conf "spark.jars.ivy=/tmp/.ivy2" \
+              --packages io.delta:delta-spark_2.12:3.2.0,org.postgresql:postgresql:42.7.4 \
+              --conf "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension" \
+              --conf "spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog" \
+              --conf "spark.ui.port=4041" \
+              --conf "spark.ui.prometheus.enabled=true" \
+              --conf "spark.sql.streaming.metricsEnabled=true" \
+              --conf "spark.metrics.conf.*.sink.prometheusServlet.class=org.apache.spark.metrics.sink.PrometheusServlet" \
+              --conf "spark.metrics.conf.*.sink.prometheusServlet.path=/metrics/prometheus" \
+              /opt/spark-apps/src/streaming/spark_clean_finalize.py > /data/spark_silver.log 2>&1'
+            echo "Job Spark silver démarré en arrière-plan (log : data/spark_silver.log)"
+
+      - id: start_slack_notifier
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Arrête l'ancien consumer Slack (s'il existe) et démarre le nouveau en arrière-plan"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          volumes:
+            - "/var/run/docker.sock:/var/run/docker.sock"
+        containerImage: docker:cli
+        commands:
+          - |
+            ANCIENS=$(docker ps -aq --filter "name=slack-notifier-")
+            if [ -n "$ANCIENS" ]; then
+              echo "Arrêt des anciens consumers Slack : $ANCIENS"
+              docker stop $ANCIENS
+              docker rm -f $ANCIENS 2>/dev/null || true
+            fi
+            docker run -d --rm \
+              --name slack-notifier-{{ execution.id }} \
+              --network activity_cdc_network \
+              -e POSTGRES_HOST=postgres \
+              -e POSTGRES_PORT=5432 \
+              -e POSTGRES_DB="{{ kv('POSTGRES_DB') }}" \
+              -e POSTGRES_USER="{{ kv('POSTGRES_USER') }}" \
+              -e POSTGRES_PASSWORD="{{ kv('POSTGRES_PASSWORD') }}" \
+              -e REDPANDA_BROKERS=redpanda:9092 \
+              -e REDPANDA_TOPIC="{{ kv('REDPANDA_TOPIC') }}" \
+              -e SLACK_WEBHOOK_URL="{{ kv('SLACK_WEBHOOK_URL') }}" \
+              {{ inputs.pipeline_image }} \
+              python -m src.notifications.generate_slack_messages
+            echo "Consumer Slack démarré en arrière-plan"
+
+  # ============================================================
+  # PHASE 3 — POST-STREAMING (KPIs + qualité)
+  # ============================================================
+  - id: post_streaming
+    type: io.kestra.plugin.core.flow.Sequential
+    description: "Calculs finaux après ingestion streaming"
+    tasks:
+
+      - id: wait_streaming_warmup
+        type: io.kestra.plugin.core.flow.Sleep
+        description: "Pause pour laisser le streaming ingérer le snapshot"
+        duration: PT60S
+
+      - id: calculer_kpis
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Calcul KPIs par salarié (primes + jours bien-être) depuis silver"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+          volumes:
+            - "{{ inputs.host_project_dir }}/data:/app/data"
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.analytics.compute_kpis
+
+      - id: quality_checks
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Validation Great Expectations sur la couche bronze"
+        runIf: "{{ inputs.run_quality_checks }}"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+          volumes:
+            - "{{ inputs.host_project_dir }}/data:/app/data"
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.quality.run_data_quality_checks
+
+  # ============================================================
+  # PHASE 4 — DÉMO LIVE (optionnelle, pour la soutenance)
+  # ============================================================
+  # Boucle infinie également : démarrée en arrière-plan (conteneur
+  # détaché), pas comme tâche Kestra bloquante.
+  - id: live_simulation
+    type: io.kestra.plugin.scripts.shell.Commands
+    description: "Démarre la simulation d'activités en temps réel en arrière-plan (démo soutenance)"
+    runIf: "{{ inputs.run_live_simulation }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      volumes:
+        - "/var/run/docker.sock:/var/run/docker.sock"
+    containerImage: docker:cli
+    commands:
+      - |
+        ANCIENS=$(docker ps -aq --filter "name=live-simulation-")
+        if [ -n "$ANCIENS" ]; then
+          echo "Arrêt des anciennes simulations live : $ANCIENS"
+          docker stop $ANCIENS
+          docker rm -f $ANCIENS 2>/dev/null || true
+        fi
+        docker run -d \
+          --name live-simulation-{{ execution.id }} \
+          --network activity_cdc_network \
+          -v "{{ inputs.host_project_dir }}/data:/app/data" \
+          -e POSTGRES_HOST=postgres \
+          -e POSTGRES_PORT=5432 \
+          -e POSTGRES_DB="{{ kv('POSTGRES_DB') }}" \
+          -e POSTGRES_USER="{{ kv('POSTGRES_USER') }}" \
+          -e POSTGRES_PASSWORD="{{ kv('POSTGRES_PASSWORD') }}" \
+          {{ inputs.pipeline_image }} \
+          python -m src.ingestion.simulate_live_activities
+        echo "Simulation live démarrée (conteneur : live-simulation-{{ execution.id }})"
+
+triggers:
+  - id: schedule_daily
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 6 * * 1-5"
+    description: "Lun-Ven à 6h (démonstration d'automatisation)"
+    disabled: true

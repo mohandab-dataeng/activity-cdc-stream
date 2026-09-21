@@ -9,6 +9,8 @@ Règles (note de cadrage) :
   - Vélo/Trottinette/Autres -> max 25 km
 """
 
+import os
+
 import requests
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
@@ -19,7 +21,7 @@ from src.config import DATABASE_URL
 from src.ingestion.models import Salarie, DistanceDomicileTravail, ValidationDeplacement
 
 ADRESSE_ENTREPRISE = "1362 Avenue des Platanes, 34970 Lattes, France"
-OSRM_URL = "http://localhost:5000"
+OSRM_URL = os.getenv("OSRM_URL", "http://localhost:5000")
 
 SEUILS_KM = {
     "Marche/running": 15,
