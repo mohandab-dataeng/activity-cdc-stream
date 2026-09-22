@@ -353,3 +353,12 @@ triggers:
     cron: "0 6 * * 1-5"
     description: "Lun-Ven à 6h (démonstration d'automatisation)"
     disabled: true
+
+errors:
+  - id: alerte_echec_pipeline
+    type: io.kestra.plugin.notifications.slack.SlackIncomingWebhook
+    url: "{{ kv('SLACK_WEBHOOK_URL') }}"
+    payload: |
+      {
+        "text": ":rotating_light: Échec du pipeline *{{ flow.id }}* (exécution `{{ execution.id }}`) — voir les logs dans Kestra."
+      }

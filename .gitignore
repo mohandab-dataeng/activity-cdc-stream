@@ -41,3 +41,5 @@ config/prometheus/data/
 .DS_Store
 .vscode/
 .idea/
+.claude
+synthese-projet.md

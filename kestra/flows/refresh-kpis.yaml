@@ -49,3 +49,12 @@ triggers:
     type: io.kestra.plugin.core.trigger.Schedule
     cron: "*/2 * * * *"
     description: "Recalcule les KPI toutes les 2 minutes"
+
+errors:
+  - id: alerte_echec_refresh
+    type: io.kestra.plugin.notifications.slack.SlackIncomingWebhook
+    url: "{{ kv('SLACK_WEBHOOK_URL') }}"
+    payload: |
+      {
+        "text": ":rotating_light: Échec du recalcul KPI *{{ flow.id }}* (exécution `{{ execution.id }}`) — voir les logs dans Kestra."
+      }

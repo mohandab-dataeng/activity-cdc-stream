@@ -76,6 +76,14 @@ def main():
         total_activites = 0
 
         for salarie in salaries:
+            deja_historique = (
+                session.query(ActiviteSportive)
+                .filter_by(id_salarie=salarie.id_salarie)
+                .first()
+            )
+            if deja_historique is not None:
+                continue  # historique déjà généré pour ce salarié, ne pas dupliquer
+
             ligne_sport = df_sport[df_sport["ID salarié"] == salarie.id_salarie]
             pratique = ligne_sport["Pratique d'un sport"].values[0] if not ligne_sport.empty else None
 
@@ -95,7 +103,8 @@ def main():
                 date_courante += timedelta(days=random.randint(2, 15))
 
         session.commit()
-        print(f"{total_activites} activité(s) générée(s) pour {len(salaries)} salarié(s)")
+        print(f"{total_activites} activité(s) générée(s) pour {len(salaries)} salarié(s) "
+              f"(salariés ayant déjà un historique ignorés)")
 
 
 if __name__ == "__main__":

@@ -228,6 +228,7 @@ Le flow enchaîne : initialisation de la base, chargement RH, référentiel spor
 - **Processus longs, pas de tâches bloquantes.** Les jobs Spark, le consumer Slack et la simulation live sont des boucles infinies : le flow les démarre en arrière-plan (`docker exec -d` / `docker run -d`) plutôt que de les exécuter comme des tâches Kestra classiques, qui ne se termineraient jamais.
 - **Pas d'accumulation entre exécutions.** Avant de démarrer un nouveau consumer Slack ou une nouvelle simulation live, le flow arrête et supprime tout conteneur du même type restant d'une exécution précédente — sans cela, plusieurs consumers coexisteraient sur le même groupe Kafka et fausseraient le lag affiché dans Grafana.
 - **Recalcul des KPI.** `compute_kpis.py` reste un script batch : il ne se déclenche pas tout seul quand une nouvelle activité arrive. Le flow `refresh-kpis` comble ce manque en le relançant automatiquement toutes les 2 minutes, pour que Metabase reflète les données à jour.
+- **Alerting.** Les deux flows (`activity-cdc-pipeline` et `refresh-kpis`) déclenchent un message Slack automatique en cas d'échec d'une tâche (bloc `errors`, plugin `SlackIncomingWebhook`), en réutilisant le même webhook que le notifier d'activités, lu depuis le KV Store.
 
 ## Lancer le pipeline manuellement (sans Kestra)
 
