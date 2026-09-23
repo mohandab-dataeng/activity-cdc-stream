@@ -44,3 +44,4 @@ config/prometheus/data/
 .claude
 synthese-projet.md
 .claude-code-history
+chemin_racine
