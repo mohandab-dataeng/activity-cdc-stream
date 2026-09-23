@@ -93,9 +93,13 @@ def main():
                     continue
 
                 texte = formater_message(session, activite)
-                envoyer_message_slack(texte)
+                try:
+                    envoyer_message_slack(texte)
+                    print(f"Message envoyé : {texte}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Échec envoi Slack (message ignoré) : {e}")
                 time.sleep(1.5)
-                print(f"Message envoyé : {texte}")
+
 
     except KeyboardInterrupt:
         print("\nArrêt du consumer.")

@@ -253,6 +253,7 @@ services:
       # Import automatique des flows au démarrage
       - ./kestra/flows:/app/flows:ro
     environment:
+      HOST_PROJECT_DIR: ${PWD}
       KESTRA_CONFIGURATION: |
         datasources:
           postgres:

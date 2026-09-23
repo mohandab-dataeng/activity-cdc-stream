@@ -5,17 +5,16 @@ Lit la couche silver (Delta Lake, via pandas) et les données PostgreSQL,
 écrit les résultats dans une table dédiée pour la restitution Metabase.
 """
 
-import glob
-from datetime import datetime
-
+from datetime import datetime, timedelta
 import pandas as pd
+from deltalake import DeltaTable
 from sqlalchemy import (
     create_engine, Column, Integer, Float, Boolean, String, Numeric, DateTime, text,
 )
 from sqlalchemy.orm import Session, declarative_base
-
 from src.config import DATABASE_URL
 from src.ingestion.models import Salarie, ValidationDeplacement
+import os
 
 SILVER_PATH = "data/silver/activites_finales"
 SEUIL_ACTIVITES_BIEN_ETRE = 15
@@ -43,10 +42,19 @@ class ConfigAvantage(Base):
 
 
 def charger_activites_silver():
-    """Lit tous les fichiers Parquet de la couche silver avec pandas."""
-    fichiers_parquet = glob.glob(f"{SILVER_PATH}/*.parquet")
-    df = pd.concat([pd.read_parquet(f) for f in fichiers_parquet], ignore_index=True)
-    return df
+    """Lit la couche silver via le journal de transactions Delta.
+
+    Retourne un DataFrame vide (mêmes colonnes attendues) si la table
+    n'existe pas encore — cas du tout premier lancement, où ce script
+    peut être appelé avant que les jobs Spark n'aient écrit quoi que
+    ce soit en silver.
+    """
+    if not os.path.exists(os.path.join(SILVER_PATH, "_delta_log")):
+        return pd.DataFrame(columns=["id", "id_salarie", "eligible_jours_bien_etre", "date_debut"])
+
+    table = DeltaTable(SILVER_PATH)
+    df = table.to_pandas()
+    return df.drop_duplicates(subset="id")
 
 
 def creer_trigger(engine):
@@ -85,14 +93,22 @@ def calculer_kpis(session, df_activites):
     )
     taux_prime = float(config.valeur)
 
+    limite_12_mois = datetime.now() - timedelta(days=365)
+    df_activites = df_activites.copy()
+    df_activites["date_debut_dt"] = pd.to_datetime(df_activites["date_debut"], unit="us")
+
     salaries = session.query(Salarie).all()
     resultats = []
 
     for salarie in salaries:
-        activites_salarie = df_activites[df_activites["id_salarie"] == salarie.id_salarie]
+        activites_salarie = df_activites[
+            (df_activites["id_salarie"] == salarie.id_salarie)
+            & (df_activites["date_debut_dt"] >= limite_12_mois)
+        ]
         nb_eligibles = activites_salarie[
             activites_salarie["eligible_jours_bien_etre"] == True
         ].shape[0]
+
 
         eligible_bien_etre = nb_eligibles >= SEUIL_ACTIVITES_BIEN_ETRE
 

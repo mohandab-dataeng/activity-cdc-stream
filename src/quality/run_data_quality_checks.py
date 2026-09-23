@@ -8,6 +8,7 @@ import glob
 import great_expectations as gx
 import great_expectations.expectations as gxe
 import pandas as pd
+import sys
 
 BRONZE_PATH = "data/bronze/activites_enrichies"
 
@@ -53,6 +54,9 @@ def main():
             toutes_reussies = False
 
     print(f"\nValidation globale : {'RÉUSSIE' if toutes_reussies else 'ÉCHEC'}")
+
+    if not toutes_reussies:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

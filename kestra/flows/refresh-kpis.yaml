@@ -14,7 +14,7 @@ labels:
 inputs:
   - id: host_project_dir
     type: STRING
-    defaults: "/home/mohamed/Formation/Data Engineer/Projet 12 Gérez un projet d'infrastructure/activity-cdc-stream"
+    defaults: "{{ envs.HOST_PROJECT_DIR }}"
     description: Chemin du projet sur l'hôte Docker, pour monter data/ (couche silver).
 
   - id: pipeline_image

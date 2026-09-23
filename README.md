@@ -41,7 +41,7 @@ L'ensemble de ce pipeline (étapes batch, démarrage des jobs Spark, notifier Sl
 | CDC | Debezium (Kafka Connect) | Redpanda Connect (l'alternative plus légère, sans JVM) nécessite une licence Enterprise même en version d'essai limitée dans le temps ; Debezium reste gratuit, open source, et sans limite de durée |
 | Broker de streaming | Redpanda | Compatible avec le protocole Kafka, plus léger à opérer que Kafka classique |
 | Traitement | PySpark Structured Streaming | Standard actuel recommandé pour le streaming (Spark Streaming/DStreams est considéré comme obsolète), accessible en Python |
-| Stockage analytique | Delta Lake | Transactions ACID, time travel natif — répond directement à l'exigence de pouvoir relancer l'historique des indicateurs si une source change (ex. taux de prime) |
+| Stockage analytique | Delta Lake | Transactions ACID et time travel natif disponibles pour la couche silver ; le recalcul effectif des primes en cas de changement de taux repose aujourd'hui sur un trigger PostgreSQL (voir `compute_kpis.py`), pas sur le time travel Delta |
 | Qualité des données | Great Expectations | Vocabulaire standard de l'industrie pour exprimer des règles de cohérence (distances non négatives, dates valides), avec documentation automatique des règles |
 | Géocodage (adresse → coordonnées) | Nominatim (OpenStreetMap) | Gratuit, sans quota journalier bas contrairement au géocodage d'OpenRouteService qui a présenté des limitations de débit peu documentées |
 | Distance routière domicile-travail | OSRM (auto-hébergé) | Gratuit et illimité une fois les données téléchargées, aucune dépendance à un service tiers avec quota ou clé API |
@@ -92,7 +92,9 @@ activity-cdc-stream/
 │   │   ├── spark_transform_enrich.py
 │   │   └── spark_clean_finalize.py
 │   ├── quality/
-│   │   └── run_data_quality_checks.py
+│   │   ├── run_data_quality_checks.py   # Bronze : nulls, distances, cohérence dates
+│   │   ├── run_silver_quality_checks.py # Silver : cohérence des jointures (référentiels)
+│   │   └── run_gold_quality_checks.py   # Gold (kpis_salaries) : cohérence des KPI finaux
 │   ├── notifications/
 │   │   └── generate_slack_messages.py
 │   └── analytics/
@@ -118,7 +120,7 @@ activity-cdc-stream/
 ```bash
 git clone <repo>
 cd activity-cdc-stream
-cp .env.example .env
+cp .env.exemple .env
 ```
 
 Éditer `.env` et renseigner :
@@ -218,10 +220,10 @@ Depuis l'UI, ouvrir `sportdata / activity-cdc-pipeline` et cliquer sur **Execute
 |---|---|---|
 | `host_project_dir` | chemin absolu du projet | Chemin du dépôt sur l'hôte Docker (pas dans le conteneur Kestra) — sert à monter `data/` dans les conteneurs éphémères créés par les tâches |
 | `pipeline_image` | `activity-cdc-stream-pipeline:latest` | Image buildée à l'étape 1 |
-| `run_quality_checks` | `true` | Lance les checks Great Expectations après le batch |
+| `run_quality_checks` | `true` | Lance les checks Great Expectations (bronze, silver, gold) |
 | `run_live_simulation` | `false` | Démarre `simulate_live_activities.py` en arrière-plan (démo en direct) |
 
-Le flow enchaîne : initialisation de la base, chargement RH, référentiel sportif, validation des déplacements, connecteur CDC, génération de l'historique d'activités, puis démarre en arrière-plan les jobs Spark bronze/silver et le consumer Slack, avant de calculer les KPI.
+Le flow enchaîne : initialisation de la base, chargement RH, référentiel sportif, validation des déplacements, connecteur CDC, génération de l'historique d'activités, puis démarre en arrière-plan les jobs Spark bronze/silver et le consumer Slack. Une fois le streaming lancé, la validation qualité s'exécute à chaque frontière de couche — bronze, puis silver — avant le calcul des KPI, lui-même suivi d'une dernière validation sur les KPI finaux (gold).
 
 ### Points d'attention
 
@@ -297,14 +299,29 @@ Toute déclaration dépassant ce seuil pour le mode annoncé est signalée comme
 
 ## Tests de qualité des données
 
+La validation est appliquée, via Great Expectations, à chaque frontière de couche du pipeline — cohérent avec la pratique medallion recommandée (un check différent à chaque étape, plutôt qu'un seul point de contrôle) : chaque script fait `sys.exit(1)` en cas d'échec, ce qui déclenche l'alerte Slack du flow Kestra.
+
 ```bash
+# Bronze : les données sont-elles arrivées correctement ?
 uv run python src/quality/run_data_quality_checks.py
 ```
-
-Ce script applique, via Great Expectations, les règles suivantes sur la couche bronze :
 - absence de valeurs nulles sur les colonnes critiques (identifiant salarié, dates, type d'activité)
 - distances non négatives
 - cohérence entre la date de début et la date de fin d'une activité
+
+```bash
+# Silver : l'enrichissement (jointures) s'est-il bien passé ?
+uv run python src/quality/run_silver_quality_checks.py
+```
+- absence de valeurs nulles sur les colonnes issues des jointures (`nom`, `prenom`, `nom_bu`, `categorie`, `eligible_jours_bien_etre`) — une valeur nulle signale une jointure ratée (référentiel entreprise ou sportif introuvable pour une ligne)
+
+```bash
+# Gold (kpis_salaries) : les KPI finaux sont-ils cohérents ?
+uv run python src/quality/run_gold_quality_checks.py
+```
+- `montant_prime` toujours positif ou nul
+- `jours_bien_etre_accordes` uniquement `0` ou `5`
+- `nb_activites_eligibles` toujours positif ou nul
 
 ## Limites connues et pistes d'évolution
 

@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "requests>=2.34.2",
     "sqlalchemy>=2.0.54",
+    "deltalake>=0.24.0",
 ]
 
 [build-system]

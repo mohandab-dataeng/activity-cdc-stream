@@ -18,7 +18,7 @@ inputs:
 
   - id: host_project_dir
     type: STRING
-    defaults: "/home/mohamed/Formation/Data Engineer/Projet 12 Gérez un projet d'infrastructure/activity-cdc-stream"
+    defaults: "{{ envs.HOST_PROJECT_DIR }}"
     description: >
       Chemin du projet sur l'HÔTE Docker (pas dans le conteneur Kestra).
       Requis pour monter data/ dans les conteneurs éphémères créés par le
@@ -179,6 +179,8 @@ tasks:
         containerImage: docker:cli
         commands:
           - |
+            docker exec -d spark sh -c 'pkill -f spark_transform_enrich.py || true' 2>/dev/null || true
+            sleep 3
             docker exec -d spark sh -c '/opt/spark/bin/spark-submit \
               --conf "spark.jars.ivy=/tmp/.ivy2" \
               --packages io.delta:delta-spark_2.12:3.2.0,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.2,org.postgresql:postgresql:42.7.4 \
@@ -224,6 +226,8 @@ tasks:
         containerImage: docker:cli
         commands:
           - |
+            docker exec -d spark sh -c 'pkill -f spark_clean_finalize.py || true' 2>/dev/null || true
+            sleep 3
             docker exec -d \
               -e POSTGRES_DB="{{ kv('POSTGRES_DB') }}" \
               -e POSTGRES_USER="{{ kv('POSTGRES_USER') }}" \
@@ -285,19 +289,6 @@ tasks:
         description: "Pause pour laisser le streaming ingérer le snapshot"
         duration: PT60S
 
-      - id: calculer_kpis
-        type: io.kestra.plugin.scripts.shell.Commands
-        description: "Calcul KPIs par salarié (primes + jours bien-être) depuis silver"
-        taskRunner:
-          type: io.kestra.plugin.scripts.runner.docker.Docker
-          networkMode: activity_cdc_network
-          volumes:
-            - "{{ inputs.host_project_dir }}/data:/app/data"
-        containerImage: "{{ inputs.pipeline_image }}"
-        env: "{{ vars.pipeline_env }}"
-        commands:
-          - cd /app && python -m src.analytics.compute_kpis
-
       - id: quality_checks
         type: io.kestra.plugin.scripts.shell.Commands
         description: "Validation Great Expectations sur la couche bronze"
@@ -311,6 +302,45 @@ tasks:
         env: "{{ vars.pipeline_env }}"
         commands:
           - cd /app && python -m src.quality.run_data_quality_checks
+
+      - id: quality_checks_silver
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Validation Great Expectations sur la couche silver (cohérence des jointures)"
+        runIf: "{{ inputs.run_quality_checks }}"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+          volumes:
+            - "{{ inputs.host_project_dir }}/data:/app/data"
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.quality.run_silver_quality_checks
+
+      - id: calculer_kpis
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Calcul KPIs par salarié (primes + jours bien-être) depuis silver"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+          volumes:
+            - "{{ inputs.host_project_dir }}/data:/app/data"
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.analytics.compute_kpis
+
+      - id: quality_checks_gold
+        type: io.kestra.plugin.scripts.shell.Commands
+        description: "Validation Great Expectations sur les KPI finaux (kpis_salaries)"
+        runIf: "{{ inputs.run_quality_checks }}"
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          networkMode: activity_cdc_network
+        containerImage: "{{ inputs.pipeline_image }}"
+        env: "{{ vars.pipeline_env }}"
+        commands:
+          - cd /app && python -m src.quality.run_gold_quality_checks
 
   # ============================================================
   # PHASE 4 — DÉMO LIVE (optionnelle, pour la soutenance)

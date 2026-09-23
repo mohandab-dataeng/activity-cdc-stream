@@ -15,8 +15,8 @@ CHECKPOINT_PATH = "/data/checkpoints/silver_activites"
 
 POSTGRES_DB = os.getenv("POSTGRES_DB", "sportdata")
 POSTGRES_JDBC_URL = f"jdbc:postgresql://postgres:5432/{POSTGRES_DB}"
-POSTGRES_USER = os.getenv("POSTGRES_USER", "admin")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "admin")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 
 def lire_referentiel(spark, table, colonnes=None):

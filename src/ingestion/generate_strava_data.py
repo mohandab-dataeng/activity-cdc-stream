@@ -26,9 +26,18 @@ TYPES_ACTIVITE = [
 SPORTS_SANS_DISTANCE = {"Escalade", "Musculation", "Yoga", "Football", "Basketball", "Tennis", "Badminton"}
 
 
-def generer_activite(id_salarie, date_debut):
-    """Génère une activité sportive réaliste pour un salarié à une date donnée."""
-    type_activite = random.choice(TYPES_ACTIVITE)
+def generer_activite(id_salarie, date_debut, sport_prefere=None):
+    """Génère une activité sportive réaliste pour un salarié à une date donnée.
+
+    Si sport_prefere est renseigné (sport déclaré par le salarié dans le
+    fichier RH), 80% des activités générées seront ce sport ; les 20%
+    restants sont tirés parmi les autres sports, pour une variété réaliste.
+    """
+    if sport_prefere and sport_prefere in TYPES_ACTIVITE and random.random() < 0.8:
+        type_activite = sport_prefere
+    else:
+        type_activite = random.choice(TYPES_ACTIVITE)
+
 
     duree_minutes = random.randint(20, 120)
     date_fin = date_debut + timedelta(minutes=duree_minutes)
@@ -94,9 +103,10 @@ def main():
             date_courante = datetime.now() - timedelta(days=365)
             for _ in range(nb_activites):
                 if date_courante > datetime.now():
-                    break  # ne jamais dépasser aujourd'hui (bug identifié plus tôt dans la conversation)
+                    break  # ne jamais dépasser aujourd'hui
 
-                activite = generer_activite(salarie.id_salarie, date_courante)
+                activite = generer_activite(salarie.id_salarie, date_courante, sport_prefere=pratique)
+
                 session.add(activite)
                 total_activites += 1
 
