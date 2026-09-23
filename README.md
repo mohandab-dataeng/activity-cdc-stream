@@ -54,8 +54,8 @@ L'ensemble de ce pipeline (étapes batch, démarrage des jobs Spark, notifier Sl
 ```
 activity-cdc-stream/
 ├── main.py                    # Orchestration du pipeline batch (alternative locale à Kestra)
-├── Dockerfile                  # Image utilisée par Kestra pour exécuter les tâches Python
-├── docker-compose.yaml
+├── Dockerfile                  # Image utilisée par Kestra pour exécuter les tâches Python (service pipeline-image)
+├── docker-compose.yaml         # Inclut le build de l'image pipeline (service pipeline-image)
 ├── pyproject.toml
 ├── .env.exemple
 ├── kestra/
@@ -183,12 +183,12 @@ Déposer les fichiers Excel fournis par les RH dans `data/raw/` (noms contenant 
 
 Le pipeline peut être piloté entièrement depuis Kestra (`docker compose up -d kestra`, interface sur `http://localhost:8085`), plutôt que de lancer chaque script manuellement. C'est l'approche recommandée : elle enchaîne le batch, démarre les jobs Spark et le consumer Slack, et calcule les KPI en une seule exécution suivie depuis l'UI.
 
-### 1. Builder l'image utilisée par les tâches Python
+### 1. Image utilisée par les tâches Python
 
-Les tâches Python du flow s'exécutent dans des conteneurs Docker isolés (et non dans le conteneur Kestra lui-même, qui n'a pas les dépendances du projet). Il faut construire cette image une première fois, puis à chaque modification du code source :
+Les tâches Python du flow s'exécutent dans des conteneurs Docker isolés (et non dans le conteneur Kestra lui-même, qui n'a pas les dépendances du projet). Cette image (`activity-cdc-stream-pipeline:latest`) est déclarée comme un service à part entière dans `docker-compose.yaml` (`pipeline-image`, sans commande de démarrage) : elle est construite automatiquement par `docker compose up`, et Kestra attend sa construction avant de démarrer. Après une modification du code source, la reconstruire explicitement :
 
 ```bash
-docker build -t activity-cdc-stream-pipeline:latest .
+docker compose build pipeline-image
 ```
 
 ### 2. Renseigner le KV Store

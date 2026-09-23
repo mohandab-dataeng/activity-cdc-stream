@@ -43,3 +43,4 @@ config/prometheus/data/
 .idea/
 .claude
 synthese-projet.md
+.claude-code-history

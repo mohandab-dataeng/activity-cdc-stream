@@ -225,9 +225,22 @@ services:
       start_period: 40s
 
 
+  pipeline-image:
+    # Ne tourne pas en continu : son seul rôle est de construire l'image
+    # activity-cdc-stream-pipeline:latest, utilisée par Kestra pour exécuter
+    # les tâches Python (voir Dockerfile). `docker compose up`/`build` la
+    # (re)construit automatiquement ; sans ce service, l'image doit être
+    # buildée manuellement et disparaît après un `docker system prune`
+    # ou un redémarrage qui viderait le cache Docker.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: activity-cdc-stream-pipeline:latest
+    command: ["true"]
+
+
   kestra:
     image: kestra/kestra:latest
-    pull_policy: always
     user: root
     command: server standalone
     volumes:
@@ -268,6 +281,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pipeline-image:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/configs || exit 1"]
