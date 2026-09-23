@@ -129,15 +129,17 @@ cp .env.exemple .env
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5433
 POSTGRES_DB=sportdata
-POSTGRES_USER=admin
-POSTGRES_PASSWORD=admin
+POSTGRES_USER=<pwd>
+POSTGRES_PASSWORD=<pwd>
 
 REDPANDA_BROKERS=localhost:19092
 REDPANDA_TOPIC=activites_sportives
 
 SLACK_WEBHOOK_URL=<votre webhook Slack>
 
-GRAFANA_ADMIN_PASSWORD=admin
+GRAFANA_ADMIN_PASSWORD=<pwd>
+
+ADRESSE_ENTREPRISE=<adresse de l'entreprise>
 ```
 
 ### 2. Installer les dépendances Python

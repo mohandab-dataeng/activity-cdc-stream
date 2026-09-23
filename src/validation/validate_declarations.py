@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from src.config import DATABASE_URL
 from src.ingestion.models import Salarie, DistanceDomicileTravail, ValidationDeplacement
 
-ADRESSE_ENTREPRISE = "1362 Avenue des Platanes, 34970 Lattes, France"
+ADRESSE_ENTREPRISE = os.getenv("ADRESSE_ENTREPRISE")
 OSRM_URL = os.getenv("OSRM_URL", "http://localhost:5000")
 
 SEUILS_KM = {
@@ -42,15 +42,24 @@ def geocoder_adresse(adresse):
 
 
 def calculer_distance_km(coord_depart, coord_arrivee):
-    """Distance routière via le serveur OSRM local (Docker), sans quota."""
+    """Distance routière via le serveur OSRM local (Docker), sans quota.
+
+    Retourne None si OSRM est indisponible ou ne trouve aucun itinéraire
+    (ex: adresse hors de la zone couverte) — un salarié problématique ne
+    doit jamais interrompre le traitement des autres.
+    """
     lon1, lat1 = coord_depart
     lon2, lat2 = coord_arrivee
     url = f"{OSRM_URL}/route/v1/driving/{lon1},{lat1};{lon2},{lat2}"
-    reponse = requests.get(url, timeout=10)
-    reponse.raise_for_status()
-    data = reponse.json()
-    distance_m = data["routes"][0]["distance"]
-    return distance_m / 1000
+    try:
+        reponse = requests.get(url, timeout=10)
+        reponse.raise_for_status()
+        data = reponse.json()
+        distance_m = data["routes"][0]["distance"]
+        return distance_m / 1000
+    except (requests.exceptions.RequestException, KeyError, IndexError) as e:
+        print(f"Erreur OSRM ({url}) : {e}")
+        return None
 
 
 def calculer_toutes_distances(session, coord_entreprise):
@@ -76,6 +85,10 @@ def calculer_toutes_distances(session, coord_entreprise):
             continue
 
         distance_km = calculer_distance_km(coord_domicile, coord_entreprise)
+        if distance_km is None:
+            print(f"Distance non calculée (route introuvable) : salarié {salarie.id_salarie}")
+            continue
+
         distance = DistanceDomicileTravail(
             id_salarie=salarie.id_salarie,
             adresse_utilisee=salarie.adresse_domicile,
