@@ -1,0 +1,59 @@
+id: monitor-spark-jobs
+namespace: sportdata
+description: |
+  Vérifie périodiquement que les jobs Spark bronze et silver sont
+  toujours actifs dans le conteneur spark. Kestra ne détecte jamais
+  tout seul qu'un job en arrière-plan (démarré via docker exec -d)
+  s'est arrêté — ce flow comble ce manque en interrogeant directement
+  les process du conteneur.
+
+labels:
+  project: activity-cdc-stream
+  env: poc
+
+tasks:
+  - id: verifier_jobs_spark
+    type: io.kestra.plugin.scripts.shell.Commands
+    description: "Vérifie la présence des process spark-submit bronze et silver"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      volumes:
+        - "/var/run/docker.sock:/var/run/docker.sock"
+    containerImage: docker:cli
+    commands:
+      - |
+        set +e
+        BRONZE_OK=$(docker exec spark pgrep -f spark_transform_enrich.py)
+        SILVER_OK=$(docker exec spark pgrep -f spark_clean_finalize.py)
+
+        if [ -z "$BRONZE_OK" ]; then
+          echo "ALERTE : job Spark bronze (spark_transform_enrich.py) absent"
+        else
+          echo "OK : job Spark bronze actif (PID $BRONZE_OK)"
+        fi
+
+        if [ -z "$SILVER_OK" ]; then
+          echo "ALERTE : job Spark silver (spark_clean_finalize.py) absent"
+        else
+          echo "OK : job Spark silver actif (PID $SILVER_OK)"
+        fi
+
+        if [ -z "$BRONZE_OK" ] || [ -z "$SILVER_OK" ]; then
+          exit 1
+        fi
+        exit 0
+
+triggers:
+  - id: verification_periodique
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "*/5 * * * *"
+    description: "Vérifie toutes les 5 minutes"
+
+errors:
+  - id: alerte_job_spark_mort
+    type: io.kestra.plugin.notifications.slack.SlackIncomingWebhook
+    url: "{{ kv('SLACK_WEBHOOK_URL') }}"
+    payload: |
+      {
+        "text": ":rotating_light: Un job Spark (bronze ou silver) ne tourne plus — voir les logs de *monitor-spark-jobs* dans Kestra pour identifier lequel."
+      }
